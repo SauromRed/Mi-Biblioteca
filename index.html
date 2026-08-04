@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#2563eb" />
+    <title>Biblioteca Personal</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Gestión de colecciones</p>
+          <h1>Biblioteca Personal</h1>
+          <p class="subtitle">Organiza libros, cómics, escanea ISBN y mantén tus datos seguros en la nube.</p>
+        </div>
+        <div class="hero-actions">
+          <button id="btnScan" class="primary">Escanear ISBN</button>
+          <button id="btnAddManual" class="secondary">Añadir manualmente</button>
+        </div>
+      </header>
+
+      <main class="main-grid">
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Explora tu colección</h2>
+            <div class="filters">
+              <button class="chip active" data-filter="all">Todo</button>
+              <button class="chip" data-filter="book">Libros</button>
+              <button class="chip" data-filter="comic">Cómics</button>
+            </div>
+          </div>
+          <label class="field">
+            <span>Buscar</span>
+            <input id="searchInput" type="search" placeholder="Título, autor, editorial o ISBN" />
+          </label>
+          <div class="stats-grid">
+            <article class="stat-card">
+              <strong id="statBooks">0</strong>
+              <span>Libros</span>
+            </article>
+            <article class="stat-card">
+              <strong id="statComics">0</strong>
+              <span>Cómics</span>
+            </article>
+            <article class="stat-card">
+              <strong id="statRating">0.0</strong>
+              <span>Valoración media</span>
+            </article>
+            <article class="stat-card">
+              <strong id="statPages">0</strong>
+              <span>Páginas</span>
+            </article>
+          </div>
+          <div id="itemsList" class="items-grid"></div>
+        </section>
+
+        <aside class="panel side-panel">
+          <section class="card">
+            <h3>Sincronización en la nube</h3>
+            <p>Conecta Firebase Firestore para guardar automáticamente tus datos en cualquier dispositivo.</p>
+            <div id="cloudStatus" class="status-pill">Sin configurar</div>
+            <div class="actions-stack">
+              <button id="btnSyncCloud" class="secondary">Sincronizar ahora</button>
+              <button id="btnExport" class="secondary">Exportar JSON</button>
+              <button id="btnImport" class="secondary">Importar JSON</button>
+            </div>
+            <input id="importFile" type="file" accept="application/json" hidden />
+          </section>
+
+          <section class="card">
+            <h3>Configuración de Firebase</h3>
+            <form id="firebaseForm" class="vertical-form">
+              <label>
+                <span>API key</span>
+                <input id="firebaseApiKey" type="text" placeholder="AIza..." />
+              </label>
+              <label>
+                <span>Auth domain</span>
+                <input id="firebaseAuthDomain" type="text" placeholder="mi-proyecto.firebaseapp.com" />
+              </label>
+              <label>
+                <span>Project ID</span>
+                <input id="firebaseProjectId" type="text" placeholder="mi-proyecto" />
+              </label>
+              <label>
+                <span>Storage bucket</span>
+                <input id="firebaseStorageBucket" type="text" placeholder="mi-proyecto.appspot.com" />
+              </label>
+              <label>
+                <span>App ID</span>
+                <input id="firebaseAppId" type="text" placeholder="1:...:web:..." />
+              </label>
+              <button type="submit" class="primary">Guardar configuración</button>
+            </form>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <div id="itemModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 id="modalTitle">Añadir elemento</h3>
+          <button id="closeModal" class="icon-button" aria-label="Cerrar">×</button>
+        </div>
+        <form id="itemForm" class="vertical-form">
+          <input id="itemId" type="hidden" />
+          <label>
+            <span>Tipo</span>
+            <select id="itemType">
+              <option value="book">Libro</option>
+              <option value="comic">Cómic</option>
+            </select>
+          </label>
+          <label>
+            <span>ISBN</span>
+            <div class="inline-group">
+              <input id="itemIsbn" type="text" placeholder="9780000000000" />
+              <button type="button" id="btnFillFromIsbn" class="secondary">Buscar datos</button>
+            </div>
+          </label>
+          <label>
+            <span>Título</span>
+            <input id="itemTitle" type="text" required />
+          </label>
+          <label>
+            <span>Autor</span>
+            <input id="itemAuthor" type="text" />
+          </label>
+          <label>
+            <span>Editorial</span>
+            <input id="itemPublisher" type="text" />
+          </label>
+          <div class="two-columns">
+            <label>
+              <span>Año</span>
+              <input id="itemYear" type="text" />
+            </label>
+            <label>
+              <span>Páginas</span>
+              <input id="itemPages" type="number" min="1" />
+            </label>
+          </div>
+          <label>
+            <span>Portada</span>
+            <input id="itemCover" type="url" placeholder="https://..." />
+          </label>
+          <label>
+            <span>Comentarios</span>
+            <textarea id="itemNotes" rows="3" placeholder="Añade tus notas personales"></textarea>
+          </label>
+          <label>
+            <span>Valoración</span>
+            <select id="itemRating">
+              <option value="0">Sin valorar</option>
+              <option value="1">1 estrella</option>
+              <option value="2">2 estrellas</option>
+              <option value="3">3 estrellas</option>
+              <option value="4">4 estrellas</option>
+              <option value="5">5 estrellas</option>
+            </select>
+          </label>
+          <button type="submit" class="primary">Guardar</button>
+        </form>
+      </div>
+    </div>
+
+    <div id="scannerModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-card scanner-card">
+        <div class="modal-header">
+          <h3>Escáner ISBN</h3>
+          <button id="closeScanner" class="icon-button" aria-label="Cerrar">×</button>
+        </div>
+        <p>Permite el acceso a la cámara. El escaneo funciona en Chrome, Edge y Safari.</p>
+        <video id="scannerVideo" autoplay playsinline muted></video>
+        <div class="scanner-actions">
+          <button id="startScanner" class="primary">Iniciar cámara</button>
+          <button id="stopScanner" class="secondary">Detener</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
