@@ -177,8 +177,8 @@
           <h3>Escáner ISBN</h3>
           <button id="closeScanner" class="icon-button" aria-label="Cerrar">×</button>
         </div>
-        <p>Permite el acceso a la cámara. El escaneo funciona en Chrome, Edge y Safari.</p>
-        <video id="scannerVideo" autoplay playsinline muted></video>
+        <p>Permite el acceso a la cámara. Si no se abre, introduce el ISBN manualmente.</p>
+        <div id="scannerContainer"></div>
         <div class="scanner-actions">
           <button id="startScanner" class="primary">Iniciar cámara</button>
           <button id="stopScanner" class="secondary">Detener</button>
@@ -186,6 +186,7 @@
       </div>
     </div>
 
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
