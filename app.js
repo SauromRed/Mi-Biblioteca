@@ -13,7 +13,8 @@
     auth: null,
     cloudStatus: "Sin configurar",
     scannerActive: false,
-    scannerHandler: null
+    scannerStream: null,
+    html5QrcodeScanner: null
   };
 
   const dom = {};
@@ -278,22 +279,23 @@
     if (!dom.itemIsbn) {
       return;
     }
-    const isbn = dom.itemIsbn.value.trim();
-    if (!isbn) {
-      showMessage("Introduce un ISBN antes de buscar datos.");
+    const rawInput = dom.itemIsbn.value;
+    const isbn = normalizeIsbn(rawInput);
+    if (!isbn || !isValidIsbn(isbn)) {
+      showMessage("Introduce un ISBN válido de 10 o 13 dígitos.");
       return;
     }
 
     showMessage("Buscando datos en Open Library...");
     try {
-      const data = await fetchOpenLibrary(isbn);
+      const data = await fetchOpenLibraryWithFallback(isbn);
       dom.itemTitle.value = data.title || "";
       dom.itemAuthor.value = data.author || "";
       dom.itemPublisher.value = data.publisher || "";
       dom.itemYear.value = data.year || "";
       dom.itemPages.value = data.pages || "";
       dom.itemCover.value = data.cover || "";
-      dom.itemIsbn.value = isbn;
+      dom.itemIsbn.value = normalizeIsbn(data.isbn || isbn);
     } catch (error) {
       console.error(error);
       showMessage("No se pudieron obtener datos. Prueba con otro ISBN o añade la ficha manualmente.");
@@ -551,58 +553,59 @@
       return;
     }
 
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      showMessage("La cámara no está disponible en este navegador.");
+    if (typeof window.Html5QrcodeScanner === "undefined") {
+      showMessage("El escáner no está disponible en este navegador.");
       return;
     }
 
     try {
-      dom.scannerContainer.innerHTML = '<p style="margin:0;color:#64748b;">Solicitando permiso de cámara...</p>';
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: "environment"
-        }
-      });
+      dom.scannerContainer.innerHTML = '<div class="scanner-loading"><p>Solicitando permiso de cámara…</p></div>';
+      state.html5QrcodeScanner = new window.Html5QrcodeScanner("scannerContainer", {
+        fps: 10,
+        qrbox: { width: 280, height: 180 },
+        formatsToSupport: [
+          window.Html5QrcodeSupportedFormats.EAN_13,
+          window.Html5QrcodeSupportedFormats.EAN_8,
+          window.Html5QrcodeSupportedFormats.UPC_A,
+          window.Html5QrcodeSupportedFormats.UPC_E
+        ],
+        rememberLastUsedCamera: true
+      }, false);
 
-      const video = document.createElement("video");
-      video.autoplay = true;
-      video.playsInline = true;
-      video.muted = true;
-      video.srcObject = stream;
-      await video.play();
-      dom.scannerContainer.innerHTML = "";
-      dom.scannerContainer.appendChild(video);
-      state.scannerActive = true;
-      state.scannerStream = stream;
-
-      const reader = new ImageCapture(stream.getVideoTracks()[0]);
-      const captureFrame = async () => {
-        if (!state.scannerActive) return;
-        try {
-          const bitmap = await reader.grabFrame();
-          const canvas = document.createElement("canvas");
-          canvas.width = bitmap.width;
-          canvas.height = bitmap.height;
-          const ctx = canvas.getContext("2d");
-          ctx.drawImage(bitmap, 0, 0);
-          const dataUrl = canvas.toDataURL("image/png");
-          if (dataUrl) {
-            window.setTimeout(captureFrame, 1000);
+      state.html5QrcodeScanner.render(
+        (decodedText) => {
+          const isbn = normalizeIsbn(decodedText);
+          if (isbn) {
+            dom.itemIsbn.value = isbn;
+            fillFromIsbn();
+            closeScannerModal();
           }
-        } catch (error) {
-          console.warn("No se pudo capturar el fotograma", error);
+        },
+        (errorMessage) => {
+          console.debug("Scan error:", errorMessage);
         }
-      };
+      );
 
-      captureFrame();
-      showMessage("Usa la cámara y apunta al código ISBN.");
+      state.scannerActive = true;
+      showMessage("Escanea un ISBN con la cámara.");
     } catch (error) {
       console.error(error);
-      showMessage("No se pudo abrir la cámara. Puedes introducir el ISBN manualmente.");
+      showMessage("No se pudo iniciar el escáner. Usa el ISBN manualmente.");
+      stopScanner();
     }
   }
 
-  function stopScanner() {
+  async function stopScanner() {
+    if (state.html5QrcodeScanner) {
+      try {
+        await state.html5QrcodeScanner.stop();
+      } catch (error) {
+        console.warn("No se pudo detener el escáner", error);
+      }
+      state.html5QrcodeScanner.clear();
+      state.html5QrcodeScanner = null;
+    }
+
     if (state.scannerStream) {
       state.scannerStream.getTracks().forEach((track) => track.stop());
       state.scannerStream = null;
@@ -616,11 +619,84 @@
   }
 
   function normalizeIsbn(code) {
-    const raw = String(code || "").trim();
-    if (/^97[0-9]{10,12}$/.test(raw)) {
-      return raw.replace(/[^0-9Xx]/g, "").slice(-13);
+    const raw = String(code || "").toUpperCase().trim();
+    const sanitized = raw.replace(/[^0-9X]/g, "");
+    if (/^[0-9]{13}$/.test(sanitized)) {
+      return sanitized;
     }
-    return raw.replace(/[^0-9Xx]/g, "");
+    if (/^[0-9]{9}[0-9X]$/.test(sanitized)) {
+      return sanitized;
+    }
+    return "";
+  }
+
+  function isValidIsbn(isbn) {
+    return /^[0-9]{13}$/.test(isbn) || /^[0-9]{9}[0-9X]$/.test(isbn);
+  }
+
+  function convertIsbn10To13(isbn10) {
+    const core = isbn10.slice(0, 9);
+    const isbn13 = `978${core}`;
+    let sum = 0;
+    for (let i = 0; i < isbn13.length; i += 1) {
+      sum += Number(isbn13[i]) * (i % 2 === 0 ? 1 : 3);
+    }
+    const remainder = sum % 10;
+    const checkDigit = remainder === 0 ? 0 : 10 - remainder;
+    return `${isbn13}${checkDigit}`;
+  }
+
+  async function fetchOpenLibraryWithFallback(isbn) {
+    const candidates = [isbn];
+    if (isbn.length === 10) {
+      candidates.push(convertIsbn10To13(isbn));
+    }
+
+    for (const candidate of candidates) {
+      try {
+        const data = await fetchOpenLibrary(candidate);
+        if (data) {
+          return { ...data, isbn: candidate };
+        }
+      } catch (_) {
+        // continue to fallback candidate
+      }
+    }
+
+    for (const candidate of candidates) {
+      try {
+        const data = await fetchGoogleBooks(candidate);
+        if (data) {
+          return { ...data, isbn: candidate };
+        }
+      } catch (_) {
+        // continue fallback
+      }
+    }
+
+    throw new Error("ISBN no encontrado en las bases de datos");
+  }
+
+  async function fetchGoogleBooks(isbn) {
+    const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error("No se pudo consultar Google Books");
+    }
+    const payload = await response.json();
+    if (!payload.items || !payload.items.length) {
+      throw new Error("ISBN no encontrado en Google Books");
+    }
+
+    const volume = payload.items[0].volumeInfo || {};
+    return {
+      title: volume.title || "",
+      author: Array.isArray(volume.authors) ? volume.authors.join(", ") : "",
+      publisher: volume.publisher || "",
+      year: volume.publishedDate ? String(volume.publishedDate).slice(0, 4) : "",
+      pages: volume.pageCount || "",
+      cover: (volume.imageLinks && (volume.imageLinks.thumbnail || volume.imageLinks.smallThumbnail)) || ""
+    };
   }
 
   function bootstrap() {
