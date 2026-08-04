@@ -524,15 +524,13 @@
     event.target.value = "";
   }
 
-  function openScannerModal() {
+  async function openScannerModal() {
     if (!dom.scannerModal) {
       return;
     }
     dom.scannerModal.classList.remove("hidden");
     dom.scannerModal.setAttribute("aria-hidden", "false");
-    window.requestAnimationFrame(() => {
-      startScanner();
-    });
+    await startScanner();
   }
 
   function closeScannerModal() {
@@ -544,7 +542,7 @@
     dom.scannerModal.setAttribute("aria-hidden", "true");
   }
 
-  function startScanner() {
+  async function startScanner() {
     if (!isBrowser || !dom.scannerContainer) {
       return;
     }
@@ -553,55 +551,61 @@
       return;
     }
 
-    if (typeof window === "undefined" || !window.Html5QrcodeScanner) {
-      showMessage("El escáner no está disponible en este navegador. Prueba Chrome o Edge.");
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showMessage("La cámara no está disponible en este navegador.");
       return;
     }
 
     try {
-      const scanner = new window.Html5QrcodeScanner(
-        "scannerContainer",
-        {
-          fps: 10,
-          qrbox: { width: 260, height: 160 },
-          rememberLastUsedCamera: true
-        },
-        false
-      );
-
-      state.scannerHandler = scanner;
-      state.scannerActive = true;
-
-      scanner.render(
-        (decodedText) => {
-          const isbn = normalizeIsbn(decodedText);
-          if (isbn) {
-            dom.itemIsbn.value = isbn;
-            fillFromIsbn();
-            closeScannerModal();
-          }
-        },
-        (error) => {
-          if (error && typeof error === "string") {
-            console.debug(error);
-          }
+      dom.scannerContainer.innerHTML = '<p style="margin:0;color:#64748b;">Solicitando permiso de cámara...</p>';
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "environment"
         }
-      );
+      });
+
+      const video = document.createElement("video");
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = true;
+      video.srcObject = stream;
+      await video.play();
+      dom.scannerContainer.innerHTML = "";
+      dom.scannerContainer.appendChild(video);
+      state.scannerActive = true;
+      state.scannerStream = stream;
+
+      const reader = new ImageCapture(stream.getVideoTracks()[0]);
+      const captureFrame = async () => {
+        if (!state.scannerActive) return;
+        try {
+          const bitmap = await reader.grabFrame();
+          const canvas = document.createElement("canvas");
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(bitmap, 0, 0);
+          const dataUrl = canvas.toDataURL("image/png");
+          if (dataUrl) {
+            window.setTimeout(captureFrame, 1000);
+          }
+        } catch (error) {
+          console.warn("No se pudo capturar el fotograma", error);
+        }
+      };
+
+      captureFrame();
+      showMessage("Usa la cámara y apunta al código ISBN.");
     } catch (error) {
       console.error(error);
-      showMessage("No se pudo abrir la cámara. Comprueba el permiso y la conexión.");
-      state.scannerActive = false;
+      showMessage("No se pudo abrir la cámara. Puedes introducir el ISBN manualmente.");
     }
   }
 
   function stopScanner() {
-    if (state.scannerHandler) {
-      try {
-        state.scannerHandler.clear();
-      } catch (error) {
-        console.warn("No fue posible limpiar el escáner", error);
-      }
-      state.scannerHandler = null;
+    if (state.scannerStream) {
+      state.scannerStream.getTracks().forEach((track) => track.stop());
+      state.scannerStream = null;
     }
 
     if (dom.scannerContainer) {
