@@ -281,6 +281,7 @@
     }
     const rawInput = dom.itemIsbn.value;
     const isbn = normalizeIsbn(rawInput);
+    dom.itemIsbn.value = isbn || rawInput.trim();
     if (!isbn || !isValidIsbn(isbn)) {
       showMessage("Introduce un ISBN válido de 10 o 13 dígitos.");
       return;
@@ -353,6 +354,12 @@
     dom.itemForm.addEventListener("submit", handleItemSubmit);
     dom.itemsList.addEventListener("click", handleItemListClick);
     dom.btnFillFromIsbn.addEventListener("click", fillFromIsbn);
+    dom.itemIsbn.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        fillFromIsbn();
+      }
+    });
     dom.searchInput.addEventListener("input", (event) => {
       state.search = event.target.value;
       renderItems();
@@ -530,6 +537,7 @@
     if (!dom.scannerModal) {
       return;
     }
+    stopScanner();
     dom.scannerModal.classList.remove("hidden");
     dom.scannerModal.setAttribute("aria-hidden", "false");
     await startScanner();
@@ -559,20 +567,21 @@
     }
 
     try {
-      dom.scannerContainer.innerHTML = '<div class="scanner-loading"><p>Solicitando permiso de cámara…</p></div>';
-      state.html5QrcodeScanner = new window.Html5QrcodeScanner("scannerContainer", {
+      dom.scannerContainer.innerHTML = '<div class="scanner-loading"><p>Preparando la cámara…</p></div>';
+      const scanner = new window.Html5QrcodeScanner("scannerContainer", {
         fps: 10,
         qrbox: { width: 280, height: 180 },
+        rememberLastUsedCamera: true,
         formatsToSupport: [
           window.Html5QrcodeSupportedFormats.EAN_13,
           window.Html5QrcodeSupportedFormats.EAN_8,
           window.Html5QrcodeSupportedFormats.UPC_A,
           window.Html5QrcodeSupportedFormats.UPC_E
-        ],
-        rememberLastUsedCamera: true
+        ]
       }, false);
 
-      state.html5QrcodeScanner.render(
+      state.html5QrcodeScanner = scanner;
+      scanner.render(
         (decodedText) => {
           const isbn = normalizeIsbn(decodedText);
           if (isbn) {
@@ -598,17 +607,11 @@
   async function stopScanner() {
     if (state.html5QrcodeScanner) {
       try {
-        await state.html5QrcodeScanner.stop();
+        await state.html5QrcodeScanner.clear();
       } catch (error) {
-        console.warn("No se pudo detener el escáner", error);
+        console.warn("No se pudo limpiar el escáner", error);
       }
-      state.html5QrcodeScanner.clear();
       state.html5QrcodeScanner = null;
-    }
-
-    if (state.scannerStream) {
-      state.scannerStream.getTracks().forEach((track) => track.stop());
-      state.scannerStream = null;
     }
 
     if (dom.scannerContainer) {
@@ -665,6 +668,17 @@
 
     for (const candidate of candidates) {
       try {
+        const data = await fetchOpenLibrarySearch(candidate);
+        if (data) {
+          return { ...data, isbn: candidate };
+        }
+      } catch (_) {
+        // continue fallback candidate
+      }
+    }
+
+    for (const candidate of candidates) {
+      try {
         const data = await fetchGoogleBooks(candidate);
         if (data) {
           return { ...data, isbn: candidate };
@@ -675,6 +689,27 @@
     }
 
     throw new Error("ISBN no encontrado en las bases de datos");
+  }
+
+  async function fetchOpenLibrarySearch(isbn) {
+    const url = `https://openlibrary.org/search.json?isbn=${isbn}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error("No se pudo consultar Open Library Search");
+    }
+    const payload = await response.json();
+    if (!payload.docs || !payload.docs.length) {
+      throw new Error("ISBN no encontrado en Open Library Search");
+    }
+    const item = payload.docs[0];
+    return {
+      title: item.title || "",
+      author: Array.isArray(item.author_name) ? item.author_name.join(", ") : item.author_name || "",
+      publisher: Array.isArray(item.publisher) ? item.publisher[0] : item.publisher || "",
+      year: item.first_publish_year ? String(item.first_publish_year) : "",
+      pages: item.number_of_pages_median || "",
+      cover: item.cover_i ? `https://covers.openlibrary.org/b/id/${item.cover_i}-M.jpg` : ""
+    };
   }
 
   async function fetchGoogleBooks(isbn) {
